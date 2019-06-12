@@ -1,0 +1,30 @@
+[package]
+name = "ks-gpsdo"
+version = "0.1.0"
+authors = ["Ilya Epifanov <elijah.epifanov@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+riscv-minimal-rt = "0.5.0"
+riscv = "0.5.2"
+bitbang-hal = "0.2.2"
+embedded-hal = "0.2.3"
+void = { version = "1.0.2", default-features = false }
+nb = "0.1.2"
+panic-halt = "0.2.0"
+volatile-register = "0.2.0"
+ufmt = "0.1.0-beta.4"
+lfsr = "0.2.0"
+arraydeque = { version = "0.4.5", default-features = false, features = ["use_generic_array"] }
+generic-array = "0.12"
+typenum = "1.10.0"
+
+[profile.release]
+codegen-units = 1
+debug = true
+lto = true
+
+[features]
+default = ["hx8k"]
+hx8k = []
+up5k = []

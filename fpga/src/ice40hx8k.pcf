@@ -1,0 +1,21 @@
+set_io clk_in     J3
+
+set_io flash_csb  R12
+set_io flash_clk  R11
+set_io flash_io0  P12
+set_io flash_io1  P11
+
+set_io ser_tx     E16
+set_io ser_rx     D15
+
+set_io ref_clk    C16
+set_io sig_clk    B16
+
+set_io gpio_0     F16
+set_io gpio_1     G16
+set_io gpio_2     E14
+set_io gpio_3     F15
+
+set_io ledb_n     B5
+set_io ledg_n     B4
+set_io ledr_n     A2
