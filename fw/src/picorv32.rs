@@ -62,50 +62,30 @@ impl GPIO {
     }
 }
 
-pub struct GPIO0 {}
+macro_rules! output_pin {
+    ($name:ident, $ix:literal) => {
+        pub struct $name {}
 
-impl OutputPin for GPIO0 {
-    type Error = ();
+        impl OutputPin for $name {
+            type Error = ();
 
-    fn set_low(&mut self) -> Result<(), Self::Error> {
-        unsafe { (*GPIO::ptr()).out.modify(|r| r & !1) };
-        Ok(())
-    }
+            fn set_low(&mut self) -> Result<(), Self::Error> {
+                unsafe { (*GPIO::ptr()).out.modify(|r| r & !(1 << $ix)) };
+                Ok(())
+            }
 
-    fn set_high(&mut self) -> Result<(), Self::Error> {
-        unsafe { (*GPIO::ptr()).out.modify(|r| r | 1) };
-        Ok(())
-    }
-}
-
-pub struct GPIO1 {}
-
-impl OutputPin for GPIO1 {
-    type Error = ();
-
-    fn set_low(&mut self) -> Result<(), Self::Error> {
-        unsafe { (*GPIO::ptr()).out.modify(|r| r & !2) };
-        Ok(())
-    }
-
-    fn set_high(&mut self) -> Result<(), Self::Error> {
-        unsafe { (*GPIO::ptr()).out.modify(|r| r | 2) };
-        Ok(())
+            fn set_high(&mut self) -> Result<(), Self::Error> {
+                unsafe { (*GPIO::ptr()).out.modify(|r| r | (1 << $ix)) };
+                Ok(())
+            }
+        }
     }
 }
 
-pub struct GPIO2 {}
-
-impl OutputPin for GPIO2 {
-    type Error = ();
-
-    fn set_low(&mut self) -> Result<(), Self::Error> {
-        unsafe { (*GPIO::ptr()).out.modify(|r| r & !4) };
-        Ok(())
-    }
-
-    fn set_high(&mut self) -> Result<(), Self::Error> {
-        unsafe { (*GPIO::ptr()).out.modify(|r| r | 4) };
-        Ok(())
-    }
-}
+output_pin!(GPIO0, 0);
+output_pin!(GPIO1, 1);
+output_pin!(GPIO2, 2);
+output_pin!(GPIO3, 3);
+output_pin!(GPIO4, 4);
+output_pin!(GPIO5, 5);
+output_pin!(GPIO6, 7);

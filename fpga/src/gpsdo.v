@@ -41,7 +41,6 @@ module gpsdo (
 		.GLOBAL_BUFFER_OUTPUT(ref_clk_buf)
 	);
 
-
   wire clk, clk_picosoc;
 	wire locked;
 	reg resetn = 0;

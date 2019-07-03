@@ -6,27 +6,27 @@
 #![feature(try_blocks)]
 #![allow(deprecated)]
 
+#[cfg(not(test))]
 extern crate panic_halt;
 #[macro_use]
 extern crate ufmt;
 
-use arraydeque::ArrayDeque;
 use core::fmt::Write;
 use embedded_hal::digital::v1_compat::OldOutputPin;
 use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::digital::InputPin;
 use embedded_hal::spi::{FullDuplex, MODE_0};
 use embedded_hal::timer::{CountDown, Periodic};
-use generic_array::GenericArray;
 use ks_gpsdo::freq_counter::{
     FrequencyCounter, FrequencyCounters, FrequencyCountersToleranceCheck,
 };
 use ks_gpsdo::max5216::MAX5216;
 use ks_gpsdo::picorv32::*;
 use riscv_minimal_rt::entry;
-use typenum::U120;
+use typenum::consts::*;
 use ufmt::uWrite;
 use void::Void;
+use ks_gpsdo::filter::{UniformAverageFilter, ExponentialAverageFilter};
 
 struct GPIODummyIn {}
 
@@ -67,46 +67,6 @@ impl CountDown for BusyWaitTimer {
 
 impl Periodic for BusyWaitTimer {}
 
-struct FilterPoint {
-    process_variable: f64,
-    predicted_adjustment: f64,
-}
-
-struct Filter<L: generic_array::ArrayLength<FilterPoint>> {
-    points: ArrayDeque<GenericArray<FilterPoint, L>, arraydeque::Wrapping>,
-}
-
-impl<L: generic_array::ArrayLength<FilterPoint>> Filter<L> {
-    pub fn new() -> Self {
-        Self {
-            points: ArrayDeque::new(),
-        }
-    }
-
-    pub fn add(&mut self, process_variable: f64) {
-        self.points.push_back(FilterPoint {
-            process_variable,
-            predicted_adjustment: 0.0,
-        });
-    }
-
-    pub fn get(&self) -> f64 {
-        self.points.iter().fold(0.0, |acc, point| {
-            acc + point.predicted_adjustment + point.process_variable
-        }) / (self.points.len() as f64)
-    }
-
-    pub fn apply_adjustment(&mut self, adjustment: f64) {
-        for p in self.points.iter_mut() {
-            p.predicted_adjustment += adjustment;
-        }
-    }
-
-    pub fn is_full(&self) -> bool {
-        self.points.len() == self.points.capacity()
-    }
-}
-
 struct ControlLoop<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> {
     console: CONSOLE,
     tolerance_check: FrequencyCountersToleranceCheck,
@@ -126,7 +86,7 @@ impl<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> ControlLoop<SP
                 #[cfg(feature = "hx8k")]
                 target_clk: 201_000_000,
                 #[cfg(feature = "up5k")]
-                target_clk: 201_000_000,
+                target_clk: 100_500_000,
                 clk_tolerance: 10_000,
             },
             dac: MAX5216::new(spi, cs),
@@ -254,17 +214,45 @@ impl<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> ControlLoop<SP
 
         let i_factor = 0.01;
         let p_factor = 0.2;
-        let min_change = 10;
+        let min_quick_change = 20;
 
         let mut op_point = init_op_point;
+
+        writeln!(self.console, "Establishing an initial filter value").ok();
+        let initial_filter_value = loop {
+            let mut filter = UniformAverageFilter::<U60>::new();
+            while !filter.is_full() {
+                let counters = self.get_counters()?;
+                let raw_freq = counters.get_frequency(1.0);
+                filter.add(raw_freq);
+            }
+
+            let freq = filter.get();
+            let p_error = self.tolerance_check.target_sig_cnt as f64 - freq;
+
+            let new_op_point = (op_point as i32
+                + (p_error / sensitivity) as i32)
+                .clamp(0, 0xffff) as u16;
+            let adj = new_op_point as i32 - op_point as i32;
+
+            if adj != 0 {
+                self.dac.set_v(new_op_point);
+                op_point = new_op_point;
+            }
+
+            if adj.abs() <= 10 {
+                break freq;
+            } else {
+                writeln!(self.console, "Adjusted the DAC by {}, repeating", adj).ok();
+            }
+        };
+
+        self.output_flag = true;
+        writeln!(self.console, "Frequency is in spec, running a slow control loop now").ok();
+        let mut filter = ExponentialAverageFilter::new(3600, initial_filter_value);
         let mut i_error = 0.0;
 
-        let mut filter = Filter::<U120>::new();
-
         loop {
-            if filter.is_full() {
-                self.output_flag = true;
-            }
             if let Some(counters) = self.get_counters().ok() {
                 let raw_freq = counters.get_frequency(1.0);
                 filter.add(raw_freq);
@@ -279,7 +267,11 @@ impl<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> ControlLoop<SP
                     + (((i_error * i_factor + p_error * p_factor) / sensitivity) as i32))
                     .clamp(0, 0xffff) as u16;
                 let adj = new_op_point as i32 - op_point as i32;
-                let actual_adj = if adj.abs() >= min_change { adj } else { 0 };
+                let actual_adj = if adj.abs() >= min_quick_change {
+                    adj - min_quick_change + adj / 10
+                } else {
+                    adj / 10
+                };
                 writeln!(self.console, "freq: {:.03},\traw_freq: {:.03},\terr_i: {:.03}cycles,\terr_p: {:.03},\tadj: {},\tactual: {}",
                          freq, raw_freq, i_error, p_error, adj, actual_adj).ok();
                 if actual_adj != 0 {
@@ -334,6 +326,7 @@ fn main() -> ! {
 
             control_loop.run_servo_loop(v, sensitivity)?;
         };
-        uwriteln!(&mut console, "Stabilizing").ok();
+
+        uwriteln!(&mut console, "Restarting").ok();
     }
 }

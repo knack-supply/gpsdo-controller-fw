@@ -9,6 +9,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "assert_approx_eq"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "bare-metal"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -65,10 +70,13 @@ name = "ks-gpsdo"
 version = "0.1.0"
 dependencies = [
  "arraydeque 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "assert_approx_eq 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitbang-hal 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "embedded-hal 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "generic-array 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "itertools 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lfsr 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libm 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "nb 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "panic-halt 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "riscv 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -128,6 +136,11 @@ dependencies = [
  "quote 0.6.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "syn 0.15.34 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "libm"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "nb"
@@ -296,6 +309,7 @@ dependencies = [
 
 [metadata]
 "checksum arraydeque 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)" = "f0ffd3d69bd89910509a5d31d1f1353f38ccffdd116dd0099bbd6627f7bd8ad8"
+"checksum assert_approx_eq 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3c07dab4369547dbe5114677b33fbbf724971019f3818172d59a97a61c774ffd"
 "checksum bare-metal 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)" = "a3caf393d93b2d453e80638d0674597020cef3382ada454faacd43d1a55a735a"
 "checksum bit_field 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ed8765909f9009617974ab6b7d332625b320b33c326b1e9321382ef1999b5d56"
 "checksum bitbang-hal 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "69f794f6ae63869ac683076c8636854d69b856a0d6202cdd51e6018a8a785116"
@@ -308,6 +322,7 @@ dependencies = [
 "checksum lfsr-instances 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "f2b580f0bcf560988e281cf412bc4aa04da109886fedaf2d821cb6792e265f76"
 "checksum lfsr-macro-generate 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "7d1512baeb8da4f04bdd2e8de8086de799f4a6de7bb825653a76cbae0ad26bf4"
 "checksum lfsr-macro-lookup 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "afe763de684e1800a82373217fe406615cf045512351ba5e0820dd4114ef4d81"
+"checksum libm 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "7fc7aa29613bd6a620df431842069224d8bc9011086b1db4c0e0cd47fa03ec9a"
 "checksum nb 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "b1411551beb3c11dedfb0a90a0fa256b47d28b9ec2cdff34c25a2fa59e45dbdc"
 "checksum panic-halt 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "de96540e0ebde571dc55c73d60ef407c653844e6f9a1e2fdbd40c07b9252d812"
 "checksum proc-macro2 0.4.30 (registry+https://github.com/rust-lang/crates.io-index)" = "cf3d2011ab5c909338f7887f4fc896d35932e29146c12c8d01da6b22a80ba759"
