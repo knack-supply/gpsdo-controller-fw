@@ -68,6 +68,14 @@ module gpsdo (
     end
   end
 
+  wire fc_ready_picosoc;
+  cdc_pulse fc_ready_cdc(
+    .in_clk(clk),
+    .in_pulse(fc_ready),
+    .out_clk(clk_picosoc),
+    .out_pulse(fc_ready_picosoc),
+  );
+
 	wire flash_io0_oe, flash_io0_do, flash_io0_di;
 	wire flash_io1_oe, flash_io1_do, flash_io1_di;
 	// wire flash_io2_oe, flash_io2_do, flash_io2_di;
@@ -174,7 +182,7 @@ module gpsdo (
 		.flash_io2_di (1'b0),
 		.flash_io3_di (1'b0),
 
-		.irq_5        (1'b0        ),
+		.irq_5        (fc_ready_picosoc),
 		.irq_6        (1'b0        ),
 		.irq_7        (1'b0        ),
 

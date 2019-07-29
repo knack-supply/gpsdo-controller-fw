@@ -16,3 +16,28 @@ module pos_edge_det(
   end
 
 endmodule
+
+module cdc_pulse(
+  input in_clk,
+  input in_pulse,
+  input out_clk,
+  output reg out_pulse,
+);
+
+  wire busy;
+  reg req, last_req, new_req, xreq_pipe;
+
+  always @(posedge in_clk)
+    if (!busy && in_pulse)
+      req <= 1'b1;
+    else if (out_pulse)
+      req <= 1'b0;
+  assign busy = req || out_pulse;
+
+  always @(posedge out_clk)
+    { last_req, new_req, xreq_pipe } <= { new_req, xreq_pipe, req };
+
+  always @(posedge out_clk)
+    out_pulse <= !last_req && new_req;
+
+endmodule
