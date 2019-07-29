@@ -5,7 +5,7 @@ lfsr::lfsr_lookup!(
     lfsr::galois::Galois32,
     9_999_900,
     10_000_100,
-    50
+    8
 );
 
 pub fn reverse_sig(lfsr: LFSR32) -> Option<u32> {
