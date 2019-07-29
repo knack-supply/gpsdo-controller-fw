@@ -64,6 +64,7 @@ impl GPIO {
 
 macro_rules! output_pin {
     ($name:ident, $ix:literal) => {
+        #[derive(Copy, Clone)]
         pub struct $name {}
 
         impl OutputPin for $name {

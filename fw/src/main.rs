@@ -11,6 +11,9 @@ extern crate panic_halt;
 #[macro_use]
 extern crate ufmt;
 
+#[macro_use]
+extern crate picorv32_rt;
+
 use core::fmt::Write;
 use embedded_hal::digital::v1_compat::OldOutputPin;
 use embedded_hal::digital::v2::OutputPin;
@@ -21,8 +24,8 @@ use ks_gpsdo::freq_counter::{
     FrequencyCounter, FrequencyCounters, FrequencyCountersToleranceCheck,
 };
 use ks_gpsdo::max5216::MAX5216;
-use ks_gpsdo::picorv32::*;
-use riscv_minimal_rt::entry;
+use ks_gpsdo::picosoc::*;
+use picorv32_rt::entry;
 use typenum::consts::*;
 use ufmt::uWrite;
 use void::Void;
@@ -292,6 +295,10 @@ fn main() -> ! {
     let uart = UART::new();
     uart.set_speed(115_200);
 
+    unsafe {
+        picorv32::interrupt::enable();
+    }
+
     let mut console = ConsoleDevice {};
 
     uwriteln!(&mut console, "").ok();
@@ -330,3 +337,34 @@ fn main() -> ! {
         uwriteln!(&mut console, "Restarting").ok();
     }
 }
+
+pub fn timer() {
+    let mut console = ConsoleDevice {};
+    uwriteln!(&mut console, "IRQ: Timer").ok();
+}
+
+pub fn illegal_instruction() {
+    let mut console = ConsoleDevice {};
+    uwriteln!(&mut console, "IRQ: Illegal instruction").ok();
+    loop {
+        atomic::compiler_fence(Ordering::SeqCst);
+    }
+}
+
+pub fn bus_error() {
+    let mut console = ConsoleDevice {};
+    uwriteln!(&mut console, "IRQ: Bus error").ok();
+    loop {
+        atomic::compiler_fence(Ordering::SeqCst);
+    }
+}
+
+pub fn frequency_counter_ready() {
+}
+
+picorv32_interrupts!(
+    0: timer,
+    1: illegal_instruction,
+    2: bus_error,
+    5: frequency_counter_ready
+);
