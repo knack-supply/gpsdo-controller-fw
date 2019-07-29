@@ -10,6 +10,7 @@
 extern crate panic_halt;
 #[macro_use]
 extern crate ufmt;
+extern crate ks_gpsdo;
 
 #[macro_use]
 extern crate picorv32_rt;
@@ -18,7 +19,7 @@ use core::fmt::Write;
 use embedded_hal::digital::v1_compat::OldOutputPin;
 use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::digital::InputPin;
-use embedded_hal::spi::{FullDuplex, MODE_0};
+use embedded_hal::spi::MODE_0;
 use embedded_hal::timer::{CountDown, Periodic};
 use ks_gpsdo::freq_counter::{
     FrequencyCounter, FrequencyCounters, FrequencyCountersToleranceCheck,
@@ -29,7 +30,11 @@ use picorv32_rt::entry;
 use typenum::consts::*;
 use ufmt::uWrite;
 use void::Void;
-use ks_gpsdo::filter::{UniformAverageFilter, ExponentialAverageFilter};
+use ks_gpsdo::filter::UniformAverageFilter;
+use ks_gpsdo::bus::SharedBusManager;
+use core::sync::atomic;
+use core::sync::atomic::Ordering;
+use ks_gpsdo::control::FeedbackControl;
 
 struct GPIODummyIn {}
 
@@ -70,7 +75,7 @@ impl CountDown for BusyWaitTimer {
 
 impl Periodic for BusyWaitTimer {}
 
-struct ControlLoop<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> {
+struct ControlLoop<SPI: embedded_hal::blocking::spi::Write<u8>, CS: OutputPin, CONSOLE: uWrite + Write> {
     console: CONSOLE,
     tolerance_check: FrequencyCountersToleranceCheck,
     dac: MAX5216<SPI, CS>,
@@ -79,7 +84,7 @@ struct ControlLoop<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> 
     output_flag: bool,
 }
 
-impl<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> ControlLoop<SPI, CS, CONSOLE> {
+impl<SPI: embedded_hal::blocking::spi::Write<u8>, CS: OutputPin, CONSOLE: uWrite + Write> ControlLoop<SPI, CS, CONSOLE> {
     pub fn new(spi: SPI, cs: CS, console: CONSOLE) -> Self {
         Self {
             console,
@@ -105,6 +110,11 @@ impl<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> ControlLoop<SP
             if let Some(last_epoch) = self.last_epoch {
                 if last_epoch == counters.epoch {
                     continue 'try_again;
+                }
+                for _ in 0..10 {
+                    if (last_epoch + 1) & 0b11 == counters.epoch {
+                        break;
+                    }
                 }
                 if (last_epoch + 1) & 0b11 != counters.epoch {
                     writeln!(self.console, "Missed counter update").ok();
@@ -161,28 +171,28 @@ impl<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> ControlLoop<SP
             }
             writeln!(self.console, "Hunting: [{}, {}]", min, max).ok();
 
-            let samples = if max - min < 4 { 10 } else { 1 };
+            let samples = if max - min < 1024 { 10 } else { 1 };
 
             let mut v_limits_adjusted = false;
 
             let min_freq = self.frequency_at_v(samples, min)?;
             if min_freq > target_freq {
-                min = min.saturating_sub(100);
+                min = min.saturating_sub(1000);
                 v_limits_adjusted = true;
             }
 
             let max_freq = self.frequency_at_v(samples, max)?;
             if max_freq < target_freq {
-                max = max.saturating_add(100);
+                max = max.saturating_add(1000);
                 v_limits_adjusted = true;
             }
+
+            writeln!(self.console, "Frequencies: [{}, {}]", min_freq, max_freq).ok();
 
             if v_limits_adjusted {
                 writeln!(self.console, "DAC codes adjusted").ok();
                 continue;
             }
-
-            writeln!(self.console, "Frequencies: [{}, {}]", min_freq, max_freq).ok();
 
             let test_v = (((self.tolerance_check.target_sig_cnt as f64) - min_freq)
                 / (max_freq - min_freq)
@@ -215,10 +225,6 @@ impl<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> ControlLoop<SP
         self.dac.set_v(init_op_point);
         self.get_counters()?;
 
-        let i_factor = 0.01;
-        let p_factor = 0.2;
-        let min_quick_change = 20;
-
         let mut op_point = init_op_point;
 
         writeln!(self.console, "Establishing an initial filter value").ok();
@@ -233,8 +239,7 @@ impl<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> ControlLoop<SP
             let freq = filter.get();
             let p_error = self.tolerance_check.target_sig_cnt as f64 - freq;
 
-            let new_op_point = (op_point as i32
-                + (p_error / sensitivity) as i32)
+            let new_op_point = (op_point as i32 + (p_error / sensitivity) as i32)
                 .clamp(0, 0xffff) as u16;
             let adj = new_op_point as i32 - op_point as i32;
 
@@ -252,36 +257,31 @@ impl<SPI: FullDuplex<u8>, CS: OutputPin, CONSOLE: uWrite + Write> ControlLoop<SP
 
         self.output_flag = true;
         writeln!(self.console, "Frequency is in spec, running a slow control loop now").ok();
-        let mut filter = ExponentialAverageFilter::new(3600, initial_filter_value);
-        let mut i_error = 0.0;
+
+        let mut feedback_control = FeedbackControl::new(
+            op_point,
+            initial_filter_value,
+            self.tolerance_check.target_sig_cnt as f64,
+            sensitivity,
+            0.0005,
+            0.1,
+            0.25,
+        );
 
         loop {
             if let Some(counters) = self.get_counters().ok() {
                 let raw_freq = counters.get_frequency(1.0);
-                filter.add(raw_freq);
+                feedback_control.set_frequency(raw_freq);
+                feedback_control.tick();
 
-                let freq = filter.get();
+                let new_op_point = feedback_control.get_dac_code();
 
-                let p_error = self.tolerance_check.target_sig_cnt as f64 - freq;
-                let raw_p_error = self.tolerance_check.target_sig_cnt as f64 - raw_freq;
-                i_error += raw_p_error;
-
-                let new_op_point = (op_point as i32
-                    + (((i_error * i_factor + p_error * p_factor) / sensitivity) as i32))
-                    .clamp(0, 0xffff) as u16;
-                let adj = new_op_point as i32 - op_point as i32;
-                let actual_adj = if adj.abs() >= min_quick_change {
-                    adj - min_quick_change + adj / 10
-                } else {
-                    adj / 10
-                };
-                writeln!(self.console, "freq: {:.03},\traw_freq: {:.03},\terr_i: {:.03}cycles,\terr_p: {:.03},\tadj: {},\tactual: {}",
-                         freq, raw_freq, i_error, p_error, adj, actual_adj).ok();
-                if actual_adj != 0 {
+                writeln!(self.console, "freq: {:.03},\traw_freq: {:.03},\terr_i: {:.03}cycles,\tadj: {}",
+                         feedback_control.get_filtered_frequency(), raw_freq,
+                         feedback_control.get_i_error(), new_op_point as i32 - op_point as i32).ok();
+                if new_op_point != op_point {
                     self.dac.set_v(new_op_point);
                     op_point = new_op_point;
-                    let filter_adj = actual_adj as f64 * sensitivity;
-                    filter.apply_adjustment(filter_adj);
                 }
             } else {
                 self.error_flag = true;
@@ -304,14 +304,14 @@ fn main() -> ! {
     uwriteln!(&mut console, "").ok();
     uwriteln!(&mut console, "Starting").ok();
 
-    loop {
-        let sck = GPIO0 {};
-        let miso = GPIODummyIn {};
-        let mosi = GPIO1 {};
+    let sck = GPIO0 {};
+    let miso = GPIODummyIn {};
+    let mosi = GPIO1 {};
 
-        let dac_cs = GPIO2 {};
+    let dac_cs = GPIO2 {};
 
-        let spi_timer = BusyWaitTimer { cycles_to_wait: 2 };
+    let spi = {
+        let spi_timer = BusyWaitTimer { cycles_to_wait: 5 };
         let spi = bitbang_hal::spi::SPI::new(
             MODE_0,
             miso,
@@ -320,7 +320,11 @@ fn main() -> ! {
             spi_timer,
         );
 
-        let mut control_loop = ControlLoop::new(spi, dac_cs, console);
+        SharedBusManager::new(spi)
+    };
+
+    loop {
+        let mut control_loop = ControlLoop::new(spi.acquire(), dac_cs, console);
         let _result: Result<(), ()> = try {
             uwriteln!(&mut console, "Stabilizing").ok();
             control_loop.stabilize()?;

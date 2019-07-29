@@ -1,0 +1,8 @@
+version: '3'
+services:
+  jupyter:
+    build: .
+    network_mode: host
+    volumes:
+      - ./data:/data
+    user: "1000"

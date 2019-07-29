@@ -26,7 +26,13 @@ bare-metal = "0.2.4"
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"
-itertools = { version = "0.8.0", default-features = false }
+itertools = "0.8.0"
+rand = "0.7.0"
+rand_distr = "0.2.1"
+statrs = "=0.10.0"
+csv = "1.1"
+serde = "1.0.94"
+serde_derive = "1.0.94"
 
 [profile.release]
 codegen-units = 1
