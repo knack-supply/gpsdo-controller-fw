@@ -1,5 +1,76 @@
 use crate::filter::ExponentialAverageFilter;
 use libm::F64Ext;
+use crate::freq_counter::{FrequencyCounters, FrequencyCountersToleranceCheck};
+
+pub struct ControlLoop {
+    counters: Result<FrequencyCounters, ()>,
+    mode: ControlLoopMode,
+    tolerance_check: FrequencyCountersToleranceCheck,
+}
+
+enum ControlLoopMode {
+    Stopped,
+    Stabilizing {
+        stable_samples: u8,
+    },
+    FindingOperatingPoint {
+        lower_bound: u16,
+        upper_bound: u16,
+    },
+    EstimatingControlSensititvity,
+    Running {
+        control: FeedbackControl,
+    },
+}
+
+impl ControlLoop {
+    fn set_frequency(&mut self, counters: Result<FrequencyCounters, ()>) {
+        self.counters = counters;
+    }
+
+    fn start(&mut self) {
+        self.mode = ControlLoopMode::Stabilizing {
+            stable_samples: 0,
+        };
+    }
+
+    fn stop(&mut self) {
+        self.mode = ControlLoopMode::Stopped;
+    }
+
+    fn tick(&mut self) {
+        if let Ok(counters) = &self.counters {
+            match &mut self.mode {
+                ControlLoopMode::Stopped => {},
+                ControlLoopMode::Stabilizing { stable_samples } => {
+                    if self.tolerance_check.check_tolerance(counters) {
+                        *stable_samples += 1;
+                    } else {
+                        *stable_samples = 0;
+                    }
+                    if *stable_samples > 5 {
+                        self.mode = ControlLoopMode::FindingOperatingPoint {
+                            lower_bound: 0,
+                            upper_bound: 0xffffu16,
+                        }
+                    }
+                },
+                ControlLoopMode::FindingOperatingPoint { .. }  => {
+
+                },
+                ControlLoopMode::EstimatingControlSensititvity => {
+
+                },
+                ControlLoopMode::Running { control } => {
+                    control.set_frequency(counters.get_frequency(1.0));
+                    control.tick();
+                }
+            }
+        } else {
+            self.mode = ControlLoopMode::Stopped;
+        }
+    }
+}
 
 pub struct FeedbackControl {
     frequency: f64,

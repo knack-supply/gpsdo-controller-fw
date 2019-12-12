@@ -4,6 +4,7 @@
 #![feature(asm)]
 #![feature(clamp)]
 #![feature(try_blocks)]
+#![feature(alloc_error_handler)]
 #![allow(deprecated)]
 
 #[cfg(not(test))]
@@ -15,65 +16,42 @@ extern crate ks_gpsdo;
 #[macro_use]
 extern crate picorv32_rt;
 
+extern crate alloc;
+
 use core::fmt::Write;
-use embedded_hal::digital::v1_compat::OldOutputPin;
+use embedded_hal::digital::v1_compat::{OldOutputPin, OldInputPin};
 use embedded_hal::digital::v2::OutputPin;
-use embedded_hal::digital::InputPin;
-use embedded_hal::spi::MODE_0;
-use embedded_hal::timer::{CountDown, Periodic};
-use ks_gpsdo::freq_counter::{
-    FrequencyCounter, FrequencyCounters, FrequencyCountersToleranceCheck,
-};
+use embedded_hal::spi::MODE_1;
+use embedded_hal::timer::CountDown;
+use ks_gpsdo::freq_counter::{FrequencyCounters, FrequencyCountersToleranceCheck, FrequencyCountersFuture};
 use ks_gpsdo::max5216::MAX5216;
 use ks_gpsdo::picosoc::*;
 use picorv32_rt::entry;
 use typenum::consts::*;
 use ufmt::uWrite;
-use void::Void;
 use ks_gpsdo::filter::UniformAverageFilter;
 use ks_gpsdo::bus::SharedBusManager;
 use core::sync::atomic;
 use core::sync::atomic::Ordering;
 use ks_gpsdo::control::FeedbackControl;
+use ks_gpsdo::allocator::RISCVHeap;
+use ks_gpsdo::ads1018::ADS1018;
+use ks_gpsdo::ads1018;
+use ks_gpsdo::hal::BusyWaitTimer;
 
-struct GPIODummyIn {}
-
-impl InputPin for GPIODummyIn {
-    fn is_high(&self) -> bool {
-        false
-    }
-
-    fn is_low(&self) -> bool {
-        true
-    }
+#[allow(non_upper_case_globals)]
+extern "C" {
+    static _sheap: u8;
+    static _eheap: u8;
 }
 
-#[derive(Clone, Copy)]
-struct BusyWaitTimer {
-    cycles_to_wait: u32,
+#[global_allocator]
+static ALLOCATOR: RISCVHeap = RISCVHeap::empty();
+
+#[alloc_error_handler]
+fn alloc_error(_: core::alloc::Layout) -> ! {
+    panic!("Allocation failure");
 }
-
-impl CountDown for BusyWaitTimer {
-    type Time = u32;
-
-    fn start<T>(&mut self, count: T)
-    where
-        T: Into<Self::Time>,
-    {
-        self.cycles_to_wait = count.into();
-    }
-
-    fn wait(&mut self) -> nb::Result<(), Void> {
-        for _ in 0..self.cycles_to_wait {
-            unsafe {
-                asm!("nop");
-            }
-        }
-        Ok(())
-    }
-}
-
-impl Periodic for BusyWaitTimer {}
 
 struct ControlLoop<SPI: embedded_hal::blocking::spi::Write<u8>, CS: OutputPin, CONSOLE: uWrite + Write> {
     console: CONSOLE,
@@ -105,26 +83,19 @@ impl<SPI: embedded_hal::blocking::spi::Write<u8>, CS: OutputPin, CONSOLE: uWrite
     }
 
     pub fn get_counters(&mut self) -> Result<FrequencyCounters, ()> {
-        'try_again: loop {
-            let counters = FrequencyCounter::get_counters()?;
-            if let Some(last_epoch) = self.last_epoch {
-                if last_epoch == counters.epoch {
-                    continue 'try_again;
-                }
-                for _ in 0..10 {
-                    if (last_epoch + 1) & 0b11 == counters.epoch {
-                        break;
-                    }
-                }
-                if (last_epoch + 1) & 0b11 != counters.epoch {
-                    writeln!(self.console, "Missed counter update").ok();
-                    return Err(());
-                }
+        writeln!(self.console, "Getting counters").ok();
+        let r = ks_gpsdo::futures::block_on(FrequencyCountersFuture::new());
+        writeln!(self.console, "Counters: {:?}", r).ok();
+
+        if let (Ok(counters), Some(last_epoch)) = (r, self.last_epoch) {
+            if (last_epoch + 1) & 0b11 != counters.epoch {
+                writeln!(self.console, "Missed counter update").ok();
+                return Err(());
             }
-            self.last_epoch = Some(counters.epoch);
-            //            writeln!(self.console, "Counters: {}, {}, {}", counters.ref_sys, counters.ref_sig, counters.sig_sys);
-            return Ok(counters);
         }
+        self.last_epoch = r.ok().map(|c| c.epoch);
+
+        r
     }
 
     pub fn stabilize(&mut self) -> Result<(), ()> {
@@ -148,6 +119,7 @@ impl<SPI: embedded_hal::blocking::spi::Write<u8>, CS: OutputPin, CONSOLE: uWrite
 
     fn frequency_at_v(&mut self, samples: u8, v: u16) -> Result<f64, ()> {
         let mut f_sum = 0.0;
+        writeln!(self.console, "DAC code: {}", v).ok();
         self.dac.set_v(v);
         self.get_counters()?;
 
@@ -304,24 +276,95 @@ fn main() -> ! {
     uwriteln!(&mut console, "").ok();
     uwriteln!(&mut console, "Starting").ok();
 
+    unsafe {
+        let heap_start = &_sheap as *const u8 as usize;
+        let heap_end = &_eheap as *const u8 as usize;
+        writeln!(&mut console, "Initializing heap at {:08x}, of size {:08x}", heap_start, heap_end - heap_start).ok();
+        ALLOCATOR.init(heap_start, heap_end - heap_start);
+    }
+
     let sck = GPIO0 {};
-    let miso = GPIODummyIn {};
+    let miso = GPIO4 {};
     let mosi = GPIO1 {};
 
-    let dac_cs = GPIO2 {};
+    let mut dac_cs = GPIO2 {};
+    let mut adc_cs = GPIO3 {};
+    dac_cs.set_high().ok();
+    adc_cs.set_high().ok();
 
     let spi = {
-        let spi_timer = BusyWaitTimer { cycles_to_wait: 5 };
+        let spi_timer = BusyWaitTimer::new(20);
         let spi = bitbang_hal::spi::SPI::new(
-            MODE_0,
-            miso,
-            OldOutputPin::new(mosi),
-            OldOutputPin::new(sck),
+            MODE_1,
+            OldInputPin::from(miso),
+            OldOutputPin::from(mosi),
+            OldOutputPin::from(sck),
             spi_timer,
         );
 
         SharedBusManager::new(spi)
     };
+
+    BusyWaitTimer::new(100000).wait().ok();
+    let mut adc = ADS1018::new(spi.acquire(), adc_cs, GPIO4 {});
+
+    loop {
+        match adc.read_temperature(ads1018::DataRate::_128SPS) {
+            Ok(reading) => {
+                writeln!(console, "ADC temperature:           \t{:04x}\t{:.03}⁰C", reading,
+                         reading as f64 * 0.125).ok();
+            }
+            Err(e) => {
+                writeln!(console, "ADC temperature error: {:?}", e).ok();
+            }
+        }
+
+        match adc.read_channel(ads1018::ExternalChannel::Channel0,
+                                                ads1018::Gain::FSR_2_048V,
+                                                ads1018::DataRate::_128SPS) {
+            Ok(reading) => {
+                writeln!(console, "ADC channel 0 (VCOCXO I):  \t{:04x}\t{:.03}A", reading,
+                        reading as f64 * 0.001 * 0.5).ok();
+            }
+            Err(e) => {
+                writeln!(console, "ADC channel 0 error: {:?}", e).ok();
+            }
+        }
+        match adc.read_channel(ads1018::ExternalChannel::Channel1,
+                                                ads1018::Gain::FSR_4_096V,
+                                                ads1018::DataRate::_128SPS) {
+            Ok(reading) => {
+                writeln!(console, "ADC channel 1 (VCOCXO Vcc):\t{:04x}\t{:.03}V", reading,
+                         reading as f64 * 0.002 * (12.0 / 5.0)).ok();
+            }
+            Err(e) => {
+                writeln!(console, "ADC channel 1 error: {:?}", e).ok();
+            }
+        }
+        match adc.read_channel(ads1018::ExternalChannel::Channel2,
+                                                ads1018::Gain::FSR_1_024V,
+                                                ads1018::DataRate::_128SPS) {
+            Ok(reading) => {
+                writeln!(console, "ADC channel 2 (VCOCXO t):  \t{:04x}\t{:.03}⁰C", reading,
+                         ((reading as f64 * 0.0005) - 0.5) * 100.0).ok();
+            }
+            Err(e) => {
+                writeln!(console, "ADC channel 2 error: {:?}", e).ok();
+            }
+        }
+        match adc.read_channel(ads1018::ExternalChannel::Channel3,
+                                                ads1018::Gain::FSR_1_024V,
+                                                ads1018::DataRate::_128SPS) {
+            Ok(reading) => {
+                writeln!(console, "ADC channel 3 (ambient t): \t{:04x}\t{:.03}⁰C", reading,
+                         ((reading as f64 * 0.0005) - 0.5) * 100.0).ok();
+            }
+            Err(e) => {
+                writeln!(console, "ADC channel 3 error: {:?}", e).ok();
+            }
+        }
+        break
+    }
 
     loop {
         let mut control_loop = ControlLoop::new(spi.acquire(), dac_cs, console);
@@ -342,28 +385,34 @@ fn main() -> ! {
     }
 }
 
-pub fn timer() {
+pub fn timer(_regs: &picorv32_rt::PicoRV32StoredRegisters) {
     let mut console = ConsoleDevice {};
     uwriteln!(&mut console, "IRQ: Timer").ok();
 }
 
-pub fn illegal_instruction() {
+pub fn illegal_instruction(regs: &picorv32_rt::PicoRV32StoredRegisters) {
     let mut console = ConsoleDevice {};
     uwriteln!(&mut console, "IRQ: Illegal instruction").ok();
+    writeln!(&mut console, "{:?}", regs).ok();
     loop {
         atomic::compiler_fence(Ordering::SeqCst);
     }
 }
 
-pub fn bus_error() {
+pub fn bus_error(regs: &picorv32_rt::PicoRV32StoredRegisters) {
     let mut console = ConsoleDevice {};
     uwriteln!(&mut console, "IRQ: Bus error").ok();
+    writeln!(&mut console, "{:?}", regs).ok();
     loop {
         atomic::compiler_fence(Ordering::SeqCst);
     }
 }
 
-pub fn frequency_counter_ready() {
+pub fn frequency_counter_ready(_regs: &picorv32_rt::PicoRV32StoredRegisters) {
+//    let mut console = ConsoleDevice {};
+//    uwriteln!(&mut console, "IRQ: Frequency counter ready").ok();
+
+    unsafe { ks_gpsdo::freq_counter::FrequencyCounterInterruptHandler::handle_interrupt(); }
 }
 
 picorv32_interrupts!(

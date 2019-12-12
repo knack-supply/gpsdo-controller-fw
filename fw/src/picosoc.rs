@@ -1,6 +1,6 @@
 use core::convert::Infallible;
 use core::fmt;
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::v2::{InputPin, OutputPin};
 use ufmt::uWrite;
 use volatile_register::RW;
 
@@ -53,7 +53,7 @@ impl fmt::Write for ConsoleDevice {
 
 #[repr(C)]
 pub struct GPIO {
-    pub out: RW<u32>,
+    pub io: RW<u32>,
 }
 
 impl GPIO {
@@ -71,13 +71,32 @@ macro_rules! output_pin {
             type Error = ();
 
             fn set_low(&mut self) -> Result<(), Self::Error> {
-                unsafe { (*GPIO::ptr()).out.modify(|r| r & !(1 << $ix)) };
+                unsafe { (*GPIO::ptr()).io.modify(|r| r & !(1 << $ix)) };
                 Ok(())
             }
 
             fn set_high(&mut self) -> Result<(), Self::Error> {
-                unsafe { (*GPIO::ptr()).out.modify(|r| r | (1 << $ix)) };
+                unsafe { (*GPIO::ptr()).io.modify(|r| r | (1 << $ix)) };
                 Ok(())
+            }
+        }
+    }
+}
+
+macro_rules! input_pin {
+    ($name:ident, $ix:literal) => {
+        #[derive(Copy, Clone)]
+        pub struct $name {}
+
+        impl InputPin for $name {
+            type Error = ();
+
+            fn is_low(&self) -> Result<bool, Self::Error> {
+                Ok(unsafe { &(*GPIO::ptr()).io } .read() & (1 << $ix) == 0)
+            }
+
+            fn is_high(&self) -> Result<bool, Self::Error> {
+                Ok(unsafe { &(*GPIO::ptr()).io } .read() & (1 << $ix) != 0)
             }
         }
     }
@@ -87,6 +106,4 @@ output_pin!(GPIO0, 0);
 output_pin!(GPIO1, 1);
 output_pin!(GPIO2, 2);
 output_pin!(GPIO3, 3);
-output_pin!(GPIO4, 4);
-output_pin!(GPIO5, 5);
-output_pin!(GPIO6, 7);
+input_pin!(GPIO4, 4);

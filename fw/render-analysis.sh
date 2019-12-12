@@ -1,5 +1,8 @@
 #!/bin/sh
 
+cargo test --target native
+
+
 NBCONVERT="docker run --rm -v $(pwd)/sim:/sim jupyter/scipy-notebook:6c3390a9292e jupyter nbconvert"
 
 $NBCONVERT --to notebook --inplace --execute /sim/data/simulation-analysis.ipynb
