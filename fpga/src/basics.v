@@ -1,5 +1,25 @@
 `default_nettype none
 
+module sr_ff(
+  input s,
+  input r,
+  input clk,
+  output reg q = 0,
+  output reg qn = 0
+);
+
+  always @(posedge clk) begin
+    if (s != r) begin
+      q <= s;
+      qn <= r;
+    end else if (s && r) begin
+      q <= 1;
+      qn <= 1;
+    end
+  end
+
+endmodule
+
 module pos_edge_det(
   input sig,
   input clk,

@@ -1,46 +1,4 @@
-//! A heap allocator for RISCV processors
-//!
-//! # Example
-//!
-//! ```
-//! // Plug in the allocator crate
-//! extern crate alloc_riscv;
-//! extern crate collections;
-//!
-//! use collections::Vec;
-//! use alloc_riscv::RISCVHeap;
-//!
-//! #[global_allocator]
-//! static ALLOCATOR: RISCVHeap = RISCVHeap::empty();
-//!
-//! // These symbols come from a linker script
-//! extern "C" {
-//!     static mut _heap_start: usize;
-//!     static mut _heap_end: usize;
-//! }
-//!
-//! #[no_mangle]
-//! pub fn main() -> ! {
-//!     // Initialize the heap BEFORE you use the allocator
-//!     unsafe { ALLOCATOR.init(_heap_start, _heap_end - _heap_start) }
-//!
-//!     let mut xs = Vec::new();
-//!     xs.push(1);
-//!     // ...
-//! }
-//! ```
-//!
-//! And in your linker script, you might have something like:
-//!
-//! ``` text
-//! /* space reserved for the stack */
-//! _stack_size = 0x1000;
-//!
-//! /* `.` is right after the .bss and .data sections */
-//! _heap_start = .;
-//! _heap_end = ORIGIN(SRAM) + LENGTH(SRAM) - _stack_size;
-//! ```
-
+#![cfg(not(test))]
 use alloc::alloc::{Alloc, Layout, AllocErr, handle_alloc_error};
 
 use linked_list_allocator::Heap;

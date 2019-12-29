@@ -15,7 +15,23 @@ set_io gpio_0     F16
 set_io gpio_1     G16
 set_io gpio_2     E14
 set_io gpio_3     F15
+set_io gpio_4     G15
 
-set_io ledb_n     B5
-set_io ledg_n     B4
-set_io ledr_n     A2
+# set_io ledb_n     B5
+# set_io ledg_n     B4
+# set_io ledr_n     A2
+
+
+set_io leds[7] B5  # D9
+set_io leds[6] B4  # D8
+set_io leds[5] A2  # D7
+set_io leds[4] A1  # D6
+set_io leds[3] C5  # D5
+set_io leds[2] C4  # D4
+set_io leds[1] B3  # D3
+set_io leds[0] C3  # D2
+
+set_io debug_flash_csb  P15
+set_io debug_flash_clk  P16
+set_io debug_flash_io0  K15
+set_io debug_flash_io1  K16

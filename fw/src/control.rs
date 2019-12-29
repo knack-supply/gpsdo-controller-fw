@@ -1,5 +1,4 @@
 use crate::filter::ExponentialAverageFilter;
-use libm::F64Ext;
 use crate::freq_counter::{FrequencyCounters, FrequencyCountersToleranceCheck};
 
 pub struct ControlLoop {
@@ -41,7 +40,7 @@ impl ControlLoop {
     fn tick(&mut self) {
         if let Ok(counters) = &self.counters {
             match &mut self.mode {
-                ControlLoopMode::Stopped => {},
+                ControlLoopMode::Stopped => {}
                 ControlLoopMode::Stabilizing { stable_samples } => {
                     if self.tolerance_check.check_tolerance(counters) {
                         *stable_samples += 1;
@@ -54,13 +53,9 @@ impl ControlLoop {
                             upper_bound: 0xffffu16,
                         }
                     }
-                },
-                ControlLoopMode::FindingOperatingPoint { .. }  => {
-
-                },
-                ControlLoopMode::EstimatingControlSensititvity => {
-
-                },
+                }
+                ControlLoopMode::FindingOperatingPoint { .. } => {}
+                ControlLoopMode::EstimatingControlSensititvity => {}
                 ControlLoopMode::Running { control } => {
                     control.set_frequency(counters.get_frequency(1.0));
                     control.tick();
@@ -84,6 +79,12 @@ pub struct FeedbackControl {
     frequency_filter: ExponentialAverageFilter,
     i_error: f64,
     p_factor: f64,
+    p_error: f64,
+    #[cfg(test)]
+    d_error: f64,
+
+    d_factor: f64,
+
     i_error_dead_zone: f64,
 }
 
@@ -95,6 +96,7 @@ impl FeedbackControl {
         control_sensitivity: f64,
         i_factor: f64,
         p_factor: f64,
+        d_factor: f64,
         i_error_dead_zone: f64,
     ) -> Self {
         Self {
@@ -102,10 +104,14 @@ impl FeedbackControl {
             frequency,
             dac_code,
             control_sensitivity,
-            frequency_filter: ExponentialAverageFilter::new(3600, frequency),
+            frequency_filter: ExponentialAverageFilter::new(600, frequency),
             i_error: Default::default(),
+            p_error: Default::default(),
+            #[cfg(test)]
+            d_error: Default::default(),
             i_factor,
             p_factor,
+            d_factor,
             i_error_dead_zone,
         }
     }
@@ -115,7 +121,7 @@ impl FeedbackControl {
     }
 
     fn nullify_dead_zone(adj: f64, dead_zone: f64) -> f64 {
-        let mut mag = adj.abs();
+        let mut mag = libm::fabs(adj);
         let sign = if adj.is_sign_positive() { 1.0 } else { -1.0 };
 
         mag -= dead_zone;
@@ -132,14 +138,20 @@ impl FeedbackControl {
         self.frequency_filter.add(self.frequency);
 
         let p_error = self.target_frequency - self.get_filtered_frequency();
-        let raw_p_error = self.target_frequency - self.frequency;
-        self.i_error += raw_p_error;
+//        let raw_p_error = self.target_frequency - self.frequency;
+        self.i_error += p_error;
+        let d_error = p_error - self.p_error;
+        self.p_error = p_error;
 
-        let i_error_adj = Self::nullify_dead_zone(self.i_error, self.i_error_dead_zone) *
-            self.i_factor / self.control_sensitivity;
-        let p_error_adj = (p_error * self.p_factor) / self.control_sensitivity;
+        #[cfg(test)] {
+            self.d_error = d_error;
+        }
 
-        let adj = (i_error_adj + p_error_adj).round();
+        let p_term = self.get_p_term();
+        let i_term = self.get_i_term();
+        let d_term = d_error * self.d_factor;
+
+        let adj = libm::round((p_term + i_term + d_term) / self.control_sensitivity);
 
         if adj != 0.0 {
             self.dac_code = (self.dac_code as i32 + adj as i32).clamp(0, 0xffff) as u16;
@@ -159,21 +171,40 @@ impl FeedbackControl {
     }
 
     pub fn get_i_error(&self) -> f64 { self.i_error }
+
+    pub fn get_i_term(&self) -> f64 {
+        Self::nullify_dead_zone(self.i_error, self.i_error_dead_zone) * self.i_factor
+    }
+
+    pub fn get_p_error(&self) -> f64 { self.p_error }
+
+    pub fn get_p_term(&self) -> f64 {
+        self.p_error * self.p_factor
+    }
+
+    #[cfg(test)]
+    pub fn get_d_error(&self) -> f64 { self.d_error }
+
+    #[cfg(test)]
+    pub fn get_d_term(&self) -> f64 {
+        self.d_error * self.d_factor
+    }
 }
 
 
 #[cfg(test)]
 mod tests {
+    use std::prelude::v1::*;
+
     use rand::Rng;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
     use rand_distr::StandardNormal;
+    use statrs::statistics::Statistics;
 
     use assert_approx_eq::assert_approx_eq;
-    use statrs::statistics::Statistics;
-    use crate::control::FeedbackControl;
 
-    use std::prelude::v1::*;
+    use crate::control::FeedbackControl;
 
     const RNG_SEED: [u8; 32] = [1, 0, 0, 0, 23, 0, 0, 0, 200, 1, 0, 0, 210, 30, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -423,10 +454,11 @@ mod tests {
                     10e6,
                     10e6,
                     OCXO::get_control_sensitivity_hz_per_v() / 65536.0 * 5.0,
-                    0.0005,
+                    0.001,
                     0.1,
-                    0.25,
-                )
+                    0.05,
+                    0.01,
+                ),
             }
         }
 
@@ -462,6 +494,9 @@ mod tests {
                 reported_frequency: self.frequency_counter.get_reported_frequency(),
                 filtered_frequency: self.feedback_control.get_filtered_frequency(),
                 control_i_error: self.feedback_control.get_i_error(),
+                control_p_term: self.feedback_control.get_p_term(),
+                control_i_term: self.feedback_control.get_i_term(),
+                control_d_term: self.feedback_control.get_d_term(),
             }
         }
 
@@ -481,6 +516,9 @@ mod tests {
         reported_frequency: f64,
         filtered_frequency: f64,
         control_i_error: f64,
+        control_p_term: f64,
+        control_i_term: f64,
+        control_d_term: f64,
     }
 
     #[test]
@@ -574,18 +612,5 @@ mod tests {
             system.tick();
             wtr.serialize(system.metrics()).unwrap();
         }
-
-//        system.set_v_ref(5.0);
-//        for _ in 0..1 {
-//            let mut freq = vec![];
-//            for _ in 0..1000 {
-//                system.tick();
-//                freq.push(system.get_reported_frequency());
-//                wtr.serialize(system.metrics()).unwrap();
-//            }
-//
-////            assert_approx_eq!(10e6, freq.clone().mean(), 0.001);
-////            assert!(freq.clone().std_dev() < 0.1);
-//        }
     }
 }

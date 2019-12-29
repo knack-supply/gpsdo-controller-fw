@@ -31,9 +31,25 @@
 ![png](index_files/index_8_0.png)
 
 
-    2.523563300296868 Hz/V
+    2.5037569811632574 Hz/V
 
 
 
 ![png](index_files/index_10_0.png)
+
+
+
+![png](index_files/index_11_0.png)
+
+
+
+![png](index_files/index_12_0.png)
+
+
+
+![png](index_files/index_13_0.png)
+
+
+
+![png](index_files/index_14_0.png)
 

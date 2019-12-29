@@ -1,7 +1,6 @@
 #!/bin/sh
 
-cargo test --target native
-
+cargo test --tests -- control::tests::
 
 NBCONVERT="docker run --rm -v $(pwd)/sim:/sim jupyter/scipy-notebook:6c3390a9292e jupyter nbconvert"
 

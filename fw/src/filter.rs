@@ -1,8 +1,8 @@
 use arraydeque::ArrayDeque;
+use arraydeque::Array;
 use generic_array::GenericArray;
 use typenum::Unsigned;
 use core::fmt;
-use libm::F64Ext;
 
 pub struct UniformAverageFilter<L: generic_array::ArrayLength<f64>> {
     points: ArrayDeque<GenericArray<f64, L>, arraydeque::Wrapping>,
@@ -133,7 +133,7 @@ pub struct ExponentialAverageFilter {
 
 impl ExponentialAverageFilter {
     pub fn new(tau: u32, initial_process_variable: f64) -> Self {
-        let alpha = 1.0 - (-1.0 / tau as f64).exp();
+        let alpha = 1.0 - libm::expf(-1.0f32 / tau as f32) as f64;
         Self {
             alpha,
             beta: 1.0 - alpha,

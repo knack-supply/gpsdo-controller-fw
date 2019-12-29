@@ -107,3 +107,4 @@ output_pin!(GPIO1, 1);
 output_pin!(GPIO2, 2);
 output_pin!(GPIO3, 3);
 input_pin!(GPIO4, 4);
+output_pin!(GPIO5, 5);

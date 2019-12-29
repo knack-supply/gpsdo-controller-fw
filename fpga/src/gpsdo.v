@@ -3,20 +3,19 @@
 module gpsdo (
 	input clk_in,
 
-  input sig_clk,
-  input ref_clk,
+	input sig_clk,
+	input ref_clk,
 
 	output ser_tx,
 	input ser_rx,
 
-	output ledr_n,
-	output ledg_n,
-	output ledb_n,
+	output [7:0] leds,
 
 	output gpio_0,
 	output gpio_1,
 	output gpio_2,
 	output gpio_3,
+	input gpio_4,
 
 	output flash_csb,
 	output flash_clk,
@@ -24,9 +23,14 @@ module gpsdo (
 	inout  flash_io1,
 	// inout  flash_io2,
 	// inout  flash_io3
+
+  output debug_flash_csb,
+	output debug_flash_clk,
+	output debug_flash_io0,
+	output debug_flash_io1,
 );
 
-  localparam SIG_BITS = 32, SYS_BITS = 32, EPOCH_BITS = 2;
+	localparam SIG_BITS = 32, SYS_BITS = 32, EPOCH_BITS = 2;
 
 	wire sig_clk_buf;
 	wire ref_clk_buf;
@@ -41,40 +45,40 @@ module gpsdo (
 		.GLOBAL_BUFFER_OUTPUT(ref_clk_buf)
 	);
 
-  wire clk, clk_picosoc;
+	wire clk, clk_picosoc;
 	wire locked;
 	reg resetn = 0;
-  pll pll(.clock_in(clk_in), .clock_out(clk), .clock_src_out(clk_picosoc), .locked(locked));
+	pll pll(.clock_in(clk_in), .clock_out(clk), .clock_src_out(clk_picosoc), .locked(locked));
 
-  reg [SYS_BITS-1:0] fc_sig_sys_cnt;
-  reg [SIG_BITS-1:0] fc_sig_cnt;
-  reg [SYS_BITS-1:0] fc_ref_sys_cnt;
-  reg fc_ready;
-  reg [EPOCH_BITS-1:0] fc_epoch = 0;
+	reg [SYS_BITS-1:0] fc_sig_sys_cnt;
+	reg [SIG_BITS-1:0] fc_sig_cnt;
+	reg [SYS_BITS-1:0] fc_ref_sys_cnt;
+	reg fc_ready;
+	reg [EPOCH_BITS-1:0] fc_epoch = 0;
 
 	FrequencyCounter cnt(
-    .ref_clk(ref_clk_buf),
-    .sig_clk(sig_clk_buf),
-    .sys_clk(clk),
-    .sig_sys_cnt(fc_sig_sys_cnt),
-    .sig_cnt(fc_sig_cnt),
-    .ref_sys_cnt(fc_ref_sys_cnt),
-    .ready(fc_ready)
-  );
+		.ref_clk(ref_clk_buf),
+		.sig_clk(sig_clk_buf),
+		.sys_clk(clk),
+		.sig_sys_cnt(fc_sig_sys_cnt),
+		.sig_cnt(fc_sig_cnt),
+		.ref_sys_cnt(fc_ref_sys_cnt),
+		.ready(fc_ready)
+	);
 
-  always @(posedge clk) begin
-    if (fc_ready) begin
-      fc_epoch <= fc_epoch + 1;
-    end
-  end
+	always @(posedge clk) begin
+		if (fc_ready) begin
+			fc_epoch <= fc_epoch + 1;
+		end
+	end
 
-  wire fc_ready_picosoc;
-  cdc_pulse fc_ready_cdc(
-    .in_clk(clk),
-    .in_pulse(fc_ready),
-    .out_clk(clk_picosoc),
-    .out_pulse(fc_ready_picosoc),
-  );
+	wire fc_ready_picosoc;
+	cdc_pulse fc_ready_cdc(
+		.in_clk(clk),
+		.in_pulse(fc_ready),
+		.out_clk(clk_picosoc),
+		.out_pulse(fc_ready_picosoc),
+	);
 
 	wire flash_io0_oe, flash_io0_do, flash_io0_di;
 	wire flash_io1_oe, flash_io1_do, flash_io1_di;
@@ -110,52 +114,56 @@ module gpsdo (
 	wire [31:0] iomem_wdata;
 	reg  [31:0] iomem_rdata;
 
-	reg  [3:0] gpio;
+	reg  [5:0] gpio;
 
-  generate
-	always @(posedge clk_picosoc) begin
-		if (!resetn) begin
-			gpio <= 0;
-		end else begin
-			iomem_ready <= 0;
-			if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 03 && iomem_addr[7:0] == 8'h 00) begin
-				iomem_ready <= 1;
-				iomem_rdata[31:4] <= 0;
-				iomem_rdata[3:0] <= gpio;
-				if (iomem_wstrb[0]) gpio[3:0] <= iomem_wdata[3:0];
-			end else if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 03 && iomem_addr[7:0] == 8'h04) begin
-				iomem_ready <= 1;
-        if (SYS_BITS < 32) begin
-  				iomem_rdata[31:SYS_BITS] <= 0;
-        end
-				iomem_rdata[SYS_BITS-1:0] <= fc_ref_sys_cnt;
-			end else if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 03 && iomem_addr[7:0] == 8'h08) begin
-				iomem_ready <= 1;
-        if (SIG_BITS < 32) begin
-  				iomem_rdata[31:SIG_BITS] <= 0;
-        end
-				iomem_rdata[SIG_BITS-1:0] <= fc_sig_cnt;
-			end else if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 03 && iomem_addr[7:0] == 8'h0c) begin
-				iomem_ready <= 1;
-        if (SYS_BITS < 32) begin
-  				iomem_rdata[31:SYS_BITS] <= 0;
-        end
-				iomem_rdata[SYS_BITS-1:0] <= fc_sig_sys_cnt;
-			end else if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 03 && iomem_addr[7:0] == 8'h10) begin
-				iomem_ready <= 1;
-        iomem_rdata[31:EPOCH_BITS] <= 0;
-				iomem_rdata[EPOCH_BITS-1:0] <= fc_epoch;
+	generate
+		always @(posedge clk_picosoc) begin
+			if (!resetn) begin
+				gpio[3:0] <= 0;
+        gpio[5] <= 0;
+			end else begin
+				iomem_ready <= 0;
+				if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 03 && iomem_addr[7:0] == 8'h 00) begin
+					iomem_ready <= 1;
+					iomem_rdata[31:4] <= 0;
+					iomem_rdata[4:0] <= gpio;
+					if (iomem_wstrb[0]) begin
+            gpio[3:0] <= iomem_wdata[3:0];
+            gpio[5] <= iomem_wdata[5];
+          end
+				end else if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 03 && iomem_addr[7:0] == 8'h04) begin
+					iomem_ready <= 1;
+					if (SYS_BITS < 32) begin
+						iomem_rdata[31:SYS_BITS] <= 0;
+					end
+					iomem_rdata[SYS_BITS-1:0] <= fc_ref_sys_cnt;
+				end else if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 03 && iomem_addr[7:0] == 8'h08) begin
+					iomem_ready <= 1;
+					if (SIG_BITS < 32) begin
+						iomem_rdata[31:SIG_BITS] <= 0;
+					end
+					iomem_rdata[SIG_BITS-1:0] <= fc_sig_cnt;
+				end else if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 03 && iomem_addr[7:0] == 8'h0c) begin
+					iomem_ready <= 1;
+					if (SYS_BITS < 32) begin
+						iomem_rdata[31:SYS_BITS] <= 0;
+					end
+					iomem_rdata[SYS_BITS-1:0] <= fc_sig_sys_cnt;
+				end else if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 03 && iomem_addr[7:0] == 8'h10) begin
+					iomem_ready <= 1;
+					iomem_rdata[31:EPOCH_BITS] <= 0;
+					iomem_rdata[EPOCH_BITS-1:0] <= fc_epoch;
+				end
 			end
 		end
-	end
-  endgenerate
+	endgenerate
 
 	picosoc #(
 		.BARREL_SHIFTER(0),
 		.ENABLE_MULDIV(1),
 		.ENABLE_COMPRESSED(1),
 		.ENABLE_IRQ_QREGS(0),
-		.ENABLE_COUNTERS(0),
+		.ENABLE_COUNTERS(1),
 		.MEM_WORDS(`RAM_SIZE)
 	) soc (
 		.clk          (clk_picosoc ),
@@ -194,18 +202,19 @@ module gpsdo (
 		.iomem_rdata  (iomem_rdata )
 	);
 
-  reg ledg = 0, ledr = 0, ledb = 0;
-  assign ledb_n = ledb;
-  assign ledg_n = ledg;
-  assign ledr_n = ledr;
+	reg ledg = 0, ledr = 0;
+  wire ledb;
+	assign leds[7] = ledb;
+	assign leds[6] = ledg;
+	assign leds[5] = ledr;
 
 	reg [5:0] led_pwm = 0;
 	always @(posedge clk_picosoc) begin
 		led_pwm <= led_pwm + 1;
-  	ledg <= ref_clk & (led_pwm == 0);
-  	ledr <= ~resetn;
+		ledg <= ref_clk & (led_pwm == 0);
+		ledr <= ~resetn;
 		if (locked) begin
-		  resetn <= 1;
+			resetn <= 1;
 		end
 	end
 
@@ -213,4 +222,15 @@ module gpsdo (
 	assign gpio_1 = gpio[1];
 	assign gpio_2 = gpio[2];
 	assign gpio_3 = gpio[3];
+  assign ledb = gpio[5];
+
+	always @(posedge clk_picosoc) begin
+		gpio[4] <= gpio_4;
+	end
+
+  assign debug_flash_csb = flash_csb;
+  assign debug_flash_clk = flash_clk;
+  assign debug_flash_io0 = flash_io0_di;
+  assign debug_flash_io1 = flash_io1_di;
+
 endmodule

@@ -1,11 +1,11 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![feature(asm)]
 #![feature(proc_macro_hygiene)]
 #![feature(clamp)]
 #![feature(alloc_error_handler)]
 #![feature(allocator_api)]
 #![feature(const_fn)]
-#![feature(async_await)]
+#![feature(stmt_expr_attributes)]
 
 extern crate ufmt;
 #[macro_use]

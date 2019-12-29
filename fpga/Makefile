@@ -83,16 +83,19 @@ $(addsuffix reprog_fpga,$(targets_ice40)): %reprog_fpga:
 	iceprog target/$*.bin
 
 iceprog_fw: target/fw.bin
-	iceprog -o 1M $<
+	iceprog -o 1M -v $<
 
-target/fw.bin: ../fw/target/riscv32imc-unknown-none-elf/release/ks-gpsdo
+target/fw-padded.bin: ../fw/target/riscv32imac-unknown-none-elf/release/ks-gpsdo
 	llvm-objcopy -O binary $< $@
 
-../fw/target/riscv32imc-unknown-none-elf/release/ks-gpsdo:
-	cd ../fw && cargo build --release
+target/fw.bin: target/fw-padded.bin
+	dd if=$< of=$@ bs=1M skip=1
+
+../fw/target/riscv32imac-unknown-none-elf/release/ks-gpsdo:
+	cd ../fw && cargo build --release --target riscv32imac-unknown-none-elf
 
 clean:
 	rm -f target/*
 
 .PHONY: clean ice40up5kprog ice40up5kprog_fpga iceprog_fw ice40up5ksim ice40up5ksynsim
-.PHONY: ../fw/target/riscv32imc-unknown-none-elf/release/ks-gpsdo
+.PHONY: ../fw/target/riscv32imac-unknown-none-elf/release/ks-gpsdo

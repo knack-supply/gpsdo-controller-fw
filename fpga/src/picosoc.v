@@ -129,18 +129,48 @@ module picosoc (
 			spimemio_cfgreg_sel ? spimemio_cfgreg_do : simpleuart_reg_div_sel ? simpleuart_reg_div_do :
 			simpleuart_reg_dat_sel ? simpleuart_reg_dat_do : 32'h 0000_0000;
 
+	wire pcpi_valid;
+	wire [31:0] pcpi_insn;
+	reg pcpi_ready = 0;
+
+	always @(posedge clk) begin
+		if (pcpi_valid) begin
+		case (pcpi_insn[6:0])
+			7'b0001111: begin // MISC-MEM
+				case (pcpi_insn[14:12])
+					3'b000: begin // FENCE
+						pcpi_ready <= 1;
+					end
+					3'b001: begin // FENCE.I
+						pcpi_ready <= 1;
+					end
+					default: begin
+						pcpi_ready <= 1; // 0
+					end
+				endcase
+			end
+			default: begin
+				pcpi_ready <= 1; // 0
+			end
+		endcase
+		end else begin
+			pcpi_ready <= 1; // 0
+		end
+	end
+
 	picorv32 #(
 		.STACKADDR(STACKADDR),
 		.PROGADDR_RESET(PROGADDR_RESET),
 		.PROGADDR_IRQ(PROGADDR_IRQ),
 		.BARREL_SHIFTER(BARREL_SHIFTER),
 		.COMPRESSED_ISA(ENABLE_COMPRESSED),
+    .ENABLE_PCPI(1),
 		.ENABLE_COUNTERS(ENABLE_COUNTERS),
 		.ENABLE_MUL(ENABLE_MULDIV),
 		.ENABLE_DIV(ENABLE_MULDIV),
 		.ENABLE_IRQ(1),
 		.ENABLE_IRQ_TIMER(1),
-		.ENABLE_IRQ_QREGS(0)
+		.ENABLE_IRQ_QREGS(0),
 	) cpu (
 		.clk         (clk        ),
 		.resetn      (resetn     ),
@@ -151,7 +181,14 @@ module picosoc (
 		.mem_wdata   (mem_wdata  ),
 		.mem_wstrb   (mem_wstrb  ),
 		.mem_rdata   (mem_rdata  ),
-		.irq         (irq        )
+		.irq         (irq        ),
+
+    .pcpi_valid  (pcpi_valid ),
+    .pcpi_insn   (pcpi_insn  ),
+    .pcpi_ready  (pcpi_ready ),
+    .pcpi_wr     (0          ),
+    .pcpi_rd     (0          ),
+    .pcpi_wait   (0          ),
 	);
 
 	spimemio spimemio (

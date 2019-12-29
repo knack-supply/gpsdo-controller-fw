@@ -1,10 +1,11 @@
-#![no_std]
+#![cfg(not(test))]
+#![cfg_attr(not(test), no_std)]
 #![no_main]
 #![feature(proc_macro_hygiene)]
-#![feature(asm)]
+//#![feature(asm)]
 #![feature(clamp)]
 #![feature(try_blocks)]
-#![feature(alloc_error_handler)]
+#![cfg_attr(not(test), feature(alloc_error_handler))]
 #![allow(deprecated)]
 
 #[cfg(not(test))]
@@ -16,7 +17,10 @@ extern crate ks_gpsdo;
 #[macro_use]
 extern crate picorv32_rt;
 
+#[cfg(not(test))]
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 use core::fmt::Write;
 use embedded_hal::digital::v1_compat::{OldOutputPin, OldInputPin};
@@ -34,20 +38,24 @@ use ks_gpsdo::bus::SharedBusManager;
 use core::sync::atomic;
 use core::sync::atomic::Ordering;
 use ks_gpsdo::control::FeedbackControl;
+#[cfg(not(test))]
 use ks_gpsdo::allocator::RISCVHeap;
 use ks_gpsdo::ads1018::ADS1018;
 use ks_gpsdo::ads1018;
 use ks_gpsdo::hal::BusyWaitTimer;
 
+#[cfg(not(test))]
 #[allow(non_upper_case_globals)]
 extern "C" {
     static _sheap: u8;
     static _eheap: u8;
 }
 
+#[cfg(not(test))]
 #[global_allocator]
 static ALLOCATOR: RISCVHeap = RISCVHeap::empty();
 
+#[cfg(not(test))]
 #[alloc_error_handler]
 fn alloc_error(_: core::alloc::Layout) -> ! {
     panic!("Allocation failure");
@@ -69,10 +77,13 @@ impl<SPI: embedded_hal::blocking::spi::Write<u8>, CS: OutputPin, CONSOLE: uWrite
             tolerance_check: FrequencyCountersToleranceCheck {
                 target_sig_cnt: 10_000_000,
                 sig_cnt_tolerance: 200,
-                #[cfg(feature = "hx8k")]
-                target_clk: 201_000_000,
-                #[cfg(feature = "up5k")]
-                target_clk: 100_500_000,
+                target_clk: if cfg!(feature = "hx8k") {
+                    201_000_000
+                } else if cfg!(feature = "up5k") {
+                    100_500_000
+                } else {
+                    unreachable!()
+                },
                 clk_tolerance: 10_000,
             },
             dac: MAX5216::new(spi, cs),
@@ -235,9 +246,10 @@ impl<SPI: embedded_hal::blocking::spi::Write<u8>, CS: OutputPin, CONSOLE: uWrite
             initial_filter_value,
             self.tolerance_check.target_sig_cnt as f64,
             sensitivity,
-            0.0005,
+            0.001,
             0.1,
-            0.25,
+            0.05,
+            0.01,
         );
 
         loop {
@@ -276,6 +288,7 @@ fn main() -> ! {
     uwriteln!(&mut console, "").ok();
     uwriteln!(&mut console, "Starting").ok();
 
+    #[cfg(not(test))]
     unsafe {
         let heap_start = &_sheap as *const u8 as usize;
         let heap_end = &_eheap as *const u8 as usize;
