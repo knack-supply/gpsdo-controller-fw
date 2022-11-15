@@ -1,14 +1,15 @@
 #![cfg(not(test))]
-use alloc::alloc::{Alloc, Layout, AllocErr, handle_alloc_error};
+use alloc::alloc::Layout;
 
 use linked_list_allocator::Heap;
 use picorv32::interrupt;
 use picorv32::interrupt::Mutex;
 use core::ptr::NonNull;
 use core::alloc::GlobalAlloc;
+use core::cell::RefCell;
 
 pub struct RISCVHeap {
-    heap: Mutex<Heap>,
+    heap: Mutex<RefCell<Heap>>,
 }
 
 impl RISCVHeap {
@@ -19,7 +20,7 @@ impl RISCVHeap {
     /// [`init`](struct.RISCVHeap.html#method.init) method before using the allocator.
     pub const fn empty() -> Self {
         Self {
-            heap: Mutex::new(Heap::empty()),
+            heap: Mutex::new(RefCell::new(Heap::empty())),
         }
     }
 
@@ -48,48 +49,43 @@ impl RISCVHeap {
     /// - `size > 0`
     pub unsafe fn init(&self, start_addr: usize, size: usize) {
         interrupt::free(|cs| {
-            let heap = (self.heap.borrow(cs) as *const Heap as *mut Heap).as_mut().unwrap();
-            heap.init(start_addr, size);
+            self.heap
+                .borrow(cs)
+                .borrow_mut()
+                .init(start_addr as *mut u8, size);
         });
+    }
+
+    /// Returns an estimate of the amount of bytes in use.
+    pub fn used(&self) -> usize {
+        interrupt::free(|cs| self.heap.borrow(cs).borrow_mut().used())
+    }
+
+    /// Returns an estimate of the amount of bytes available.
+    pub fn free(&self) -> usize {
+        interrupt::free(|cs| self.heap.borrow(cs).borrow_mut().free())
     }
 }
 
-unsafe impl<'a> Alloc for &'a mut RISCVHeap {
-    unsafe fn alloc(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocErr> {
-        interrupt::free(|cs| {
-            let heap = (self.heap.borrow(cs) as *const Heap as *mut Heap).as_mut().unwrap();
-            heap.allocate_first_fit(layout)
-        })
-    }
-
-    unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) {
-        interrupt::free(|cs| {
-            let heap = (self.heap.borrow(cs) as *const Heap as *mut Heap).as_mut().unwrap();
-            heap.deallocate(ptr, layout);
-        });
-    }
-}
 
 unsafe impl GlobalAlloc for RISCVHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        match interrupt::free(|cs| {
-            let heap = (self.heap.borrow(cs) as *const Heap as *mut Heap).as_mut().unwrap();
-            heap.allocate_first_fit(layout)
-        }) {
-            Ok(mut mem) => mem.as_mut() as *mut u8,
-            Err(_e) => core::ptr::null_mut(),
-        }
+        interrupt::free(|cs| {
+            self.heap
+                .borrow(cs)
+                .borrow_mut()
+                .allocate_first_fit(layout)
+                .ok()
+                .map_or(core::ptr::null_mut(), |allocation| allocation.as_ptr())
+        })
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        match NonNull::new(ptr) {
-            Some(ptr) => {
-                interrupt::free(|cs| {
-                    let heap = (self.heap.borrow(cs) as *const Heap as *mut Heap).as_mut().unwrap();
-                    heap.deallocate(ptr, layout);
-                });
-            },
-            None => handle_alloc_error(layout),
-        };
+        interrupt::free(|cs| {
+            self.heap
+                .borrow(cs)
+                .borrow_mut()
+                .deallocate(NonNull::new_unchecked(ptr), layout)
+        });
     }
 }

@@ -4,7 +4,6 @@
 #![feature(clamp)]
 #![feature(alloc_error_handler)]
 #![feature(allocator_api)]
-#![feature(const_fn)]
 #![feature(stmt_expr_attributes)]
 
 extern crate ufmt;

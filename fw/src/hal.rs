@@ -1,5 +1,6 @@
 use embedded_hal::timer::{CountDown, Periodic};
 use void::Void;
+use core::arch::asm;
 
 #[derive(Clone, Copy)]
 pub struct BusyWaitTimer {
