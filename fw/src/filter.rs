@@ -1,5 +1,4 @@
 use arraydeque::ArrayDeque;
-use arraydeque::Array;
 use generic_array::GenericArray;
 use typenum::Unsigned;
 use core::fmt;

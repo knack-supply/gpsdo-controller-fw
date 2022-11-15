@@ -3,7 +3,6 @@ use volatile_register::RO;
 use core::future::Future;
 use core::task::{Context, Poll, Waker};
 use core::pin::Pin;
-use typenum::U8;
 use alloc::rc::Rc;
 use core::cell::UnsafeCell;
 use picorv32::interrupt;
@@ -132,7 +131,7 @@ impl Future for FrequencyCountersFuture {
 }
 
 pub struct FrequencyCounterInterruptHandler {
-    queue: heapless::spsc::Queue<Rc<UnsafeCell<FrequencyCountersFutureState>>, U8, u8, heapless::spsc::SingleCore>,
+    queue: heapless::spsc::Queue<Rc<UnsafeCell<FrequencyCountersFutureState>>, 16>,
 }
 
 impl FrequencyCounterInterruptHandler {
@@ -146,7 +145,7 @@ impl FrequencyCounterInterruptHandler {
         while let Some(state) = queue.dequeue() {
             let state: &mut FrequencyCountersFutureState = state.get().as_mut().unwrap();
             state.ready = true;
-            for waker in state.waker.take() {
+            if let Some(waker) = state.waker.take() {
                 waker.wake();
             }
         };
@@ -154,7 +153,5 @@ impl FrequencyCounterInterruptHandler {
 }
 
 static mut FREQUENCY_COUNTER_INTERRUPT_HANDLER: FrequencyCounterInterruptHandler = FrequencyCounterInterruptHandler {
-    queue: heapless::spsc::Queue::<Rc<UnsafeCell<FrequencyCountersFutureState>>, U8, u8, heapless::spsc::SingleCore>(
-        unsafe { heapless::i::Queue::u8_sc() }
-    ),
+    queue: heapless::spsc::Queue::<Rc<UnsafeCell<FrequencyCountersFutureState>>, 16>::new(),
 };
